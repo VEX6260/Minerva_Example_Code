@@ -1,0 +1,91 @@
+# VEX IQ Python-Project
+import sys
+import vexiq
+
+#region config
+paddle_1_limit = vexiq.Bumper(1)
+paddle_1_drive = vexiq.Motor(2, True) # Reverse Polarity
+paddle_1_kick  = vexiq.Motor(3)
+paddle_2_limit = vexiq.Bumper(4)
+paddle_2_kick  = vexiq.Motor(5, True) # Reverse Polarity
+paddle_2_drive = vexiq.Motor(6)
+vision_10      = vexiq.VisionSensor(10)
+joystick       = vexiq.Joystick()
+#endregion config
+
+ball = vexiq.VisionObjectList()	
+last_fired_1 = 0
+last_fired_2 = 0
+MANUALCONTROL = False
+
+class Paddle():
+    def __init__(self, limit, drive, kick,):
+        self.limit = limit
+        self.drive = drive
+        self.kick = kick
+    def home(self):
+        self.drive.set_max_current(12)
+        self.drive.run(20)
+        sys.wait_for(self.limit.is_pressed)
+        self.drive.off()
+        self.drive.reset_position()
+        self.drive.run_until_position(50, -45)
+    def go(self, speed):
+        if speed < 0 and self.drive.position() < -450:
+            self.drive.run(0)
+        elif speed > 0 and self.drive.position() > -40:
+            self.drive.hold()
+        else:
+            self.drive.run(speed)
+    def play(self, x):
+        DEADBAND = 30
+        target = (x * 4) - 600 # Magic equation that turns screen coordinates into field coords
+        if (self.drive.position() < target - DEADBAND):
+            self.go(100)
+        elif (self.drive.position() > target + DEADBAND):
+            self.go(-100)
+        else:
+            self.drive.off()
+    def fire(self):
+        self.kick.run_until_position(100, 90)
+        sys.wait_for(self.kick.reached_target)
+        self.kick.run_until_position(50, 0)
+
+def debug():
+    paddle_1_drive.off()
+    paddle_2_drive.off()
+    while True:
+        print "x: ", ball[0].x, " y: ", ball[0].y, " pad1: ", paddle_1_drive.position(), " pad2: ", paddle_2_drive.position()
+
+paddle_1 = Paddle(paddle_1_limit, paddle_1_drive, paddle_1_kick)
+paddle_2 = Paddle(paddle_2_limit, paddle_2_drive, paddle_2_kick)
+
+paddle_1.home()
+paddle_2.home()
+
+# Uncomment me to drop into the calibrate loop
+#debug()
+
+while True:
+    if joystick.bFup():
+        MANUALCONTROL = True
+    elif joystick.bFdown():
+        MANUALCONTROL = False
+    vision_10.objects(1, ball)
+    paddle_1.play(ball[0].y)
+    if MANUALCONTROL:
+        paddle_2.go(joystick.axisD())
+    else:
+        paddle_2.play(ball[0].y)
+    if ball[0].x > 110 and (sys.clock() - last_fired_1) > 1:
+        last_fired_1 = sys.clock()
+        sys.run_in_thread(lambda x: paddle_1.fire())
+    elif ball[0].x < 40 and (sys.clock() - last_fired_2) > 1 and not MANUALCONTROL:
+        last_fired_2 = sys.clock()
+        sys.run_in_thread(lambda x: paddle_2.fire())
+    elif (joystick.bLup() or joystick.bLdown() or joystick.bRup() or joystick.bRdown()) and (sys.clock() - last_fired_2) > 1:
+        last_fired_2 = sys.clock()
+        sys.run_in_thread(lambda x: paddle_2.fire())
+    vexiq.lcd_write("x: " + str(ball[0].x), 1)
+    vexiq.lcd_write("y: " + str(ball[0].y), 2)
+    sys.sleep(.05)
